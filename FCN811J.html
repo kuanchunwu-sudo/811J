@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FCN 股票價格監控系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        background: 'hsl(0 0% 100%)',
+                        foreground: 'hsl(0 0% 14.5%)',
+                        card: 'hsl(0 0% 100%)',
+                        'card-foreground': 'hsl(0 0% 14.5%)',
+                        primary: 'hsl(0 0% 20.5%)',
+                        'primary-foreground': 'hsl(0 0% 98.5%)',
+                        secondary: 'hsl(0 0% 97%)',
+                        'secondary-foreground': 'hsl(0 0% 20.5%)',
+                        muted: 'hsl(0 0% 97%)',
+                        'muted-foreground': 'hsl(0 0% 55.6%)',
+                        accent: 'hsl(0 0% 97%)',
+                        'accent-foreground': 'hsl(0 0% 20.5%)',
+                        destructive: 'hsl(0 84.2% 60.2%)',
+                        border: 'hsl(0 0% 92.2%)',
+                        input: 'hsl(0 0% 92.2%)',
+                        ring: 'hsl(0 0% 70.8%)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .card {
+            @apply bg-card text-card-foreground rounded-lg border border-border shadow-sm;
+        }
+        .card-header {
+            @apply flex flex-col space-y-1.5 p-6;
+        }
+        .card-title {
+            @apply text-2xl font-semibold leading-none tracking-tight;
+        }
+        .card-description {
+            @apply text-sm text-muted-foreground;
+        }
+        .card-content {
+            @apply p-6 pt-0;
+        }
+        .badge {
+            @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2;
+        }
+        .badge-secondary {
+            @apply border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80;
+        }
+        .badge-destructive {
+            @apply border-transparent bg-destructive text-primary-foreground hover:bg-destructive/80;
+        }
+        .btn {
+            @apply inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+        }
+        .btn-primary {
+            @apply bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2;
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-background text-foreground">
+    <div class="min-h-screen p-4">
+        <div class="max-w-6xl mx-auto">
+            <!-- 標題區域 -->
+            <div class="mb-8">
+                <h1 class="text-3xl font-bold mb-2">FCN 股票價格監控系統</h1>
+                <p class="text-muted-foreground">
+                    監控 FCN-811J 股票價格，當價格低於出場價時自動提醒
+                </p>
+                <div class="flex items-center gap-4 mt-4">
+                    <button id="refreshBtn" class="btn btn-primary flex items-center gap-2">
+                        <svg id="refreshIcon" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span id="refreshText">手動更新</span>
+                    </button>
+                    <span id="lastUpdate" class="text-sm text-muted-foreground"></span>
+                </div>
+            </div>
+
+            <!-- 警告區域 -->
+            <div id="alertSection" class="mb-8 hidden">
+                <div class="card border-destructive bg-red-50">
+                    <div class="card-header">
+                        <div class="card-title flex items-center gap-2 text-destructive">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                            </svg>
+                            價格警告
+                        </div>
+                        <div class="card-description">
+                            以下股票價格已低於出場價格
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div id="alertList" class="space-y-2"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 股票卡片區域 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div id="stockCards"></div>
+            </div>
+
+            <!-- 說明區域 -->
+            <div class="mt-8 text-center text-sm text-muted-foreground">
+                <p>數據每30秒自動更新一次 | 使用 Alpha Vantage API (主) 或 FMP API (備用) 提供的股票數據</p>
+                <p class="mt-1">注意：Alpha Vantage 免費 API 有每分鐘 5 次請求和每日 500 次請求的限制。</p>
+                <p class="mt-1">當股票價格低於設定的出場價格時，系統會在頂部顯示警告通知</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // FCN 股票配置
+        const STOCKS = [
+            { symbol: 'NVDA', exitPrice: 170.57, name: '台積' },
+            { symbol: 'TSLA', exitPrice: 336.00, name: '博通.' },
+            { symbol: 'PLTR', exitPrice: 154.90, name: '趴懶.' },
+            { symbol: 'ALAB', exitPrice: 178.86, name: '特斯拉.' },
+            
+        ];
+
+        // Alpha Vantage API 配置
+        const ALPHA_VANTAGE_API_KEY = '6YMNB269A2CIB6LZ';
+        const ALPHA_VANTAGE_BASE_URL = 'https://www.alphavantage.co/query';
+
+        // FMP API 配置
+        const FMP_API_KEY = 'Eiv0Z4yjAixNTrfKB24sO35Exyh8aBMl';
+        const FMP_BASE_URL = 'https://financialmodelingprep.com/api/v3';
+
+        let stockData = {};
+        let alerts = [];
+        let loading = false;
+
+        // 獲取股票價格 (使用 Alpha Vantage API)
+        async function fetchPriceFromAlphaVantage(symbol) {
+            try {
+                const response = await fetch(`${ALPHA_VANTAGE_BASE_URL}?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`);
+                const data = await response.json();
+
+                if (data['Global Quote']) {
+                    const quote = data['Global Quote'];
+                    return {
+                        symbol,
+                        currentPrice: parseFloat(quote['05. price']),
+                        change: parseFloat(quote['09. change']),
+                        changePercent: parseFloat(quote['10. change percent'].replace('%', '')),
+                        previousClose: parseFloat(quote['08. previous close']),
+                        timestamp: Date.now()
+                    };
+                } else {
+                    console.warn(`Alpha Vantage: No Global Quote data for ${symbol}:`, data);
+                    return null;
+                }
+            } catch (error) {
+                console.error(`Alpha Vantage: Error fetching data for ${symbol}:`, error);
+                return null;
+            }
+        }
+
+        // 獲取股票價格 (使用 FMP API)
+        async function fetchPriceFromFMP(symbol) {
+            try {
+                const response = await fetch(`${FMP_BASE_URL}/quote/${symbol}?apikey=${FMP_API_KEY}`);
+                const data = await response.json();
+
+                if (data && data.length > 0) {
+                    const quote = data[0];
+                    return {
+                        symbol,
+                        currentPrice: parseFloat(quote.price),
+                        change: parseFloat(quote.change),
+                        changePercent: parseFloat(quote.changesPercentage),
+                        previousClose: parseFloat(quote.previousClose),
+                        timestamp: Date.now()
+                    };
+                } else {
+                    console.warn(`FMP: No data for ${symbol}:`, data);
+                    return null;
+                }
+            } catch (error) {
+                console.error(`FMP: Error fetching data for ${symbol}:`, error);
+                return null;
+            }
+        }
+
+        // 獲取股票價格 (優先使用 Alpha Vantage，失敗則備用 FMP)
+        async function fetchStockPrice(symbol) {
+            let data = await fetchPriceFromAlphaVantage(symbol);
+            if (!data) {
+                console.log(`Alpha Vantage failed for ${symbol}, trying FMP...`);
+                data = await fetchPriceFromFMP(symbol);
+            }
+            return data;
+        }
+
+        // 格式化價格
+        function formatPrice(price) {
+            return price ? `$${price.toFixed(2)}` : 'N/A';
+        }
+
+        // 格式化變化百分比
+        function formatChangePercent(percent) {
+            return percent ? `${percent > 0 ? '+' : ''}${percent.toFixed(2)}%` : 'N/A';
+        }
+
+        // 獲取所有股票數據
+        async function fetchAllStocks() {
+            loading = true;
+            updateUI();
+
+            const newStockData = {};
+            const newAlerts = [];
+
+            for (const stock of STOCKS) {
+                const data = await fetchStockPrice(stock.symbol);
+                if (data) {
+                    newStockData[stock.symbol] = data;
+                    
+                    // 檢查是否低於出場價
+                    if (data.currentPrice < stock.exitPrice) {
+                        newAlerts.push({
+                            symbol: stock.symbol,
+                            name: stock.name,
+                            currentPrice: data.currentPrice,
+                            exitPrice: stock.exitPrice,
+                            timestamp: Date.now()
+                        });
+                    }
+                }
+            }
+
+            stockData = newStockData;
+            alerts = newAlerts;
+            loading = false;
+            updateUI();
+        }
+
+        // 更新UI
+        function updateUI() {
+            // 更新按鈕狀態
+            const refreshBtn = document.getElementById('refreshBtn');
+            const refreshIcon = document.getElementById('refreshIcon');
+            const refreshText = document.getElementById('refreshText');
+
+            if (loading) {
+                refreshBtn.disabled = true;
+                refreshIcon.classList.add('animate-spin');
+                refreshText.textContent = '更新中...';
+            } else {
+                refreshBtn.disabled = false;
+                refreshIcon.classList.remove('animate-spin');
+                refreshText.textContent = '手動更新';
+            }
+
+            // 更新最後更新時間
+            if (!loading && Object.keys(stockData).length > 0) {
+                document.getElementById('lastUpdate').textContent = 
+                    `最後更新: ${new Date().toLocaleTimeString()}`;
+            }
+
+            // 更新警告區域
+            const alertSection = document.getElementById('alertSection');
+            const alertList = document.getElementById('alertList');
+
+            if (alerts.length > 0) {
+                alertSection.classList.remove('hidden');
+                alertList.innerHTML = alerts.map(alert => `
+                    <div class="flex items-center justify-between p-3 bg-background rounded-lg">
+                        <div>
+                            <span class="font-medium">${alert.symbol}</span>
+                            <span class="text-sm text-muted-foreground ml-2">${alert.name}</span>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-destructive font-medium">
+                                ${formatPrice(alert.currentPrice)} < ${formatPrice(alert.exitPrice)}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                alertSection.classList.add('hidden');
+            }
+
+            // 更新股票卡片
+            const stockCards = document.getElementById('stockCards');
+            stockCards.innerHTML = STOCKS.map(stock => {
+                const data = stockData[stock.symbol];
+                const isAlert = data && data.currentPrice < stock.exitPrice;
+                const isPositive = data && data.change > 0;
+
+                return `
+                    <div class="card ${isAlert ? 'border-destructive' : ''}">
+                        <div class="card-header">
+                            <div class="flex items-center justify-between">
+                                <div class="card-title text-lg">${stock.symbol}</div>
+                                ${isAlert ? `
+                                    <svg class="h-5 w-5 text-destructive" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                                    </svg>
+                                ` : ''}
+                            </div>
+                            <div class="card-description text-sm">
+                                ${stock.name}
+                            </div>
+                        </div>
+                        <div class="card-content">
+                            <div class="space-y-4">
+                                <!-- 當前價格 -->
+                                <div>
+                                    <div class="text-2xl font-bold">
+                                        ${formatPrice(data?.currentPrice)}
+                                    </div>
+                                    ${data ? `
+                                        <div class="flex items-center gap-1 text-sm ${isPositive ? 'text-green-600' : 'text-red-600'}">
+                                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${isPositive ? 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' : 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6'}"></path>
+                                            </svg>
+                                            ${formatPrice(Math.abs(data.change))} (${formatChangePercent(data.changePercent)})
+                                        </div>
+                                    ` : ''}
+                                </div>
+
+                                <!-- 出場價格 -->
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm text-muted-foreground">出場價格:</span>
+                                    <span class="font-medium">${formatPrice(stock.exitPrice)}</span>
+                                </div>
+
+                                <!-- 前一日收盤價 -->
+                                ${data ? `
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-sm text-muted-foreground">前日收盤:</span>
+                                        <span class="font-medium">${formatPrice(data.previousClose)}</span>
+                                    </div>
+                                ` : ''}
+
+                                <!-- 狀態標籤 -->
+                                <div class="flex justify-center">
+                                    ${!data ? 
+                                        '<span class="badge badge-secondary">載入中...</span>' :
+                                        isAlert ? 
+                                            '<span class="badge badge-destructive">低於出場價</span>' :
+                                            '<span class="badge badge-secondary">正常</span>'
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 綁定刷新按鈕事件
+            document.getElementById('refreshBtn').addEventListener('click', fetchAllStocks);
+
+            // 初始載入
+            fetchAllStocks();
+
+            // 每30秒自動更新
+            setInterval(fetchAllStocks, 3600000);
+        });
+    </script>
+</body>
+</html>
+
